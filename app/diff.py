@@ -940,41 +940,54 @@ class Engine:
                 old_value=None, new_value=str(code),
             )
 
-        for code in sorted(old_codes - new_codes):
-            self.add(
-                rule_id="response-removed", severity=BREAKING,
-                category="响应", direction="response", change="removed",
-                endpoint=endpoint, location=f"responses[{code}]",
-                old_json_path=f"{base}/responses/{encode_token(str(code))}",
-                new_json_path=None,
-                old_ref=_ref_of(old_resp[code]), new_ref=None,
-                message=(
-                    f"移除响应 {code}，依赖该状态码分支处理的客户端可能失效"
-                    + ("（通常为错误码删除，风险相对较低）。"
-                       if not _is_success_code(code) else "。")
-                ),
-                old_value=str(code), new_value=None,
-            )
+        # 旧版每个响应键在新版的生效键：明确声明的三位状态码按
+        # 同码 → 所属 1XX～5XX 范围码 → default 的顺序取生效定义
+        # （响应键更名如 200 → 2XX 不算删除）；其他响应键（default、
+        # 范围码等）仅同键名命中，维持既有精确匹配规则。
+        effective: dict[Any, Any] = {}
+        for code in sorted(old_codes):
+            matched = _effective_response_key(code, new_resp)
+            if matched is None:
+                # 完全无覆盖：该状态码在新版失去响应定义
+                self.add(
+                    rule_id="response-removed", severity=BREAKING,
+                    category="响应", direction="response", change="removed",
+                    endpoint=endpoint, location=f"responses[{code}]",
+                    old_json_path=f"{base}/responses/{encode_token(str(code))}",
+                    new_json_path=None,
+                    old_ref=_ref_of(old_resp[code]), new_ref=None,
+                    message=(
+                        f"移除响应 {code}，依赖该状态码分支处理的客户端可能失效"
+                        + ("（通常为错误码删除，风险相对较低）。"
+                           if not _is_success_code(code) else "。")
+                    ),
+                    old_value=str(code), new_value=None,
+                )
+            else:
+                effective[code] = matched
 
-        for code in sorted(old_codes & new_codes):
-            resp_base = f"{base}/responses/{encode_token(str(code))}"
+        for code in sorted(effective):
+            matched = effective[code]
+            # 两侧定义位置：旧版锚到旧键、新版锚到生效键（键更名时不同）
+            old_base = f"{base}/responses/{encode_token(str(code))}"
+            new_base = f"{base}/responses/{encode_token(str(matched))}"
             old_r, old_ref, old_bad = self._resolve_local_object(
                 self.old, old_resp[code]
             )
             new_r, new_ref, new_bad = self._resolve_local_object(
-                self.new, new_resp[code]
+                self.new, new_resp[matched]
             )
             # 响应对象的本地 $ref 无法解析时指出位置，不生成猜测结论
             # （整响应新增 / 删除另由 response-added/removed 覆盖）。
             if old_bad:
                 self._unresolved_response_ref_finding(
-                    endpoint, code, resp_base, "old",
+                    endpoint, code, old_base, "old",
                     _ref_of(old_resp[code]),
                 )
             if new_bad:
                 self._unresolved_response_ref_finding(
-                    endpoint, code, resp_base, "new",
-                    _ref_of(new_resp[code]),
+                    endpoint, code, new_base, "new",
+                    _ref_of(new_resp[matched]),
                 )
             # 任一侧响应对象无法解析：指出位置后跳过整条响应比较
             # （头 / 内容都不生成猜测结论）。
@@ -985,8 +998,8 @@ class Engine:
             common = dict(
                 category="响应", direction="response", change="changed",
                 endpoint=endpoint, location=f"responses[{code}]",
-                old_json_path=resp_base,
-                new_json_path=resp_base,
+                old_json_path=old_base,
+                new_json_path=new_base,
                 old_ref=old_ref, new_ref=new_ref,
             )
             if not new_r.get("deprecated", False) and old_r.get("deprecated", False):
@@ -1003,14 +1016,16 @@ class Engine:
                 )
 
             self._compare_response_headers(
-                endpoint, code, resp_base, old_r, new_r, old_ref, new_ref
+                endpoint, code, old_base, old_r, new_r, old_ref, new_ref,
+                new_resp_base=new_base,
             )
 
             self._compare_content(
                 old_r.get("content"), new_r.get("content"),
                 "response", endpoint,
-                resp_base,
+                old_base,
                 f"responses[{code}]", old_ref, new_ref,
+                new_base=new_base,
             )
 
     # ------------------------------------------------------------------ #
@@ -1113,12 +1128,16 @@ class Engine:
         new_resp: dict[str, Any],
         old_resp_ref: str | None,
         new_resp_ref: str | None,
+        new_resp_base: str | None = None,
     ) -> None:
         """比较两版同一操作同一状态码响应的 headers（仅此场景会走到这里）。
 
         规则：
-        - 仅比较两版共有的状态码响应；整条响应新增 / 删除由
-          response-added / response-removed 覆盖，不重复生成头发现；
+        - 仅比较两版共有操作的同一状态码响应；旧版三位状态码在新版按
+          同码 → 范围码 → default 命中生效定义时也走到这里，此时
+          new_resp_base 指向新版实际定义位置（如 responses/2XX）；
+          整条响应新增 / 删除由 response-added / response-removed 覆盖，
+          不重复生成头发现；
         - 头名不区分大小写；单侧仅大小写不同的重复定义视为文档冲突，
           指出位置而不任选一份，冲突的头不参与配对比较；
         - 旧头移除、原必填头变可选：破坏；新增头、可选变必填：兼容；
@@ -1128,7 +1147,7 @@ class Engine:
         """
         # 各侧头对象的定位锚点：响应本身为 $ref 时锚到目标响应组件
         old_hbase = old_resp_ref or resp_base
-        new_hbase = new_resp_ref or resp_base
+        new_hbase = new_resp_ref or (new_resp_base or resp_base)
         old_entries, old_conflicts = self._collect_headers(
             self.old, old_resp.get("headers"), old_hbase
         )
@@ -1369,10 +1388,14 @@ class Engine:
         loc: str,
         old_ref: str | None,
         new_ref: str | None,
+        new_base: str | None = None,
     ) -> None:
         old_content = old_content if isinstance(old_content, dict) else {}
         new_content = new_content if isinstance(new_content, dict) else {}
         old_mts, new_mts = set(old_content), set(new_content)
+        # 新版定义位置与旧版不同（响应键更名覆盖，如 200 → 2XX）时，
+        # new_base 指向新版实际定义位置；未提供时两侧共用 base。
+        new_base = base if new_base is None else new_base
 
         if direction == "request":
             for mt in sorted(new_mts - old_mts):
@@ -1382,7 +1405,7 @@ class Engine:
                     direction="request", change="added", endpoint=endpoint,
                     location=f"{loc}[{mt}]",
                     old_json_path=base + f"/content/{encode_token(mt)}",
-                    new_json_path=base + f"/content/{encode_token(mt)}",
+                    new_json_path=new_base + f"/content/{encode_token(mt)}",
                     old_ref=old_ref, new_ref=new_ref,
                     message=f"服务端新增接受媒体类型 {mt}，旧客户端不受影响。",
                     old_value=None, new_value=mt,
@@ -1405,7 +1428,7 @@ class Engine:
                     category="响应", direction="response", change="added",
                     endpoint=endpoint, location=f"{loc}[{mt}]",
                     old_json_path=None,
-                    new_json_path=base + f"/content/{encode_token(mt)}",
+                    new_json_path=new_base + f"/content/{encode_token(mt)}",
                     old_ref=None, new_ref=new_ref,
                     message=f"响应新增媒体类型 {mt}；严格校验 Content-Type 的客户端可能无法处理。",
                     old_value=None, new_value=mt,
@@ -1432,6 +1455,7 @@ class Engine:
                     loc=f"{loc} > {mt}",
                     old_ref=old_ref, new_ref=new_ref,
                     category="请求 Schema" if direction == "request" else "响应 Schema",
+                    new_base=f"{new_base}/content/{encode_token(mt)}/schema",
                 )
                 self._compare_schema(old_schema, new_schema, ctx)
 
@@ -2180,6 +2204,34 @@ def _is_success_code(code: str) -> bool:
         return 200 <= int(code) < 300
     except (TypeError, ValueError):
         return code == "default"
+
+
+def _is_three_digit_code(code: Any) -> bool:
+    """是否三位数字状态码键（YAML 可能把 200 解析成整数，统一按字符串判断）。"""
+    s = str(code)
+    return len(s) == 3 and s.isdigit()
+
+
+def _effective_response_key(code: Any, new_resp: dict[str, Any]) -> Any | None:
+    """旧版响应键在新版 responses 中的生效键；完全无覆盖返回 None。
+
+    - 任意键先按同键名命中（键统一按字符串比较，兼容 YAML 整数键）；
+    - 旧版明确声明的三位状态码再依次尝试所属 1XX～5XX 范围码
+      （如 200 → 2XX，小写 2xx 容错匹配）与 default；
+    - 其他响应键（default、范围码等）不做范围 / 默认回落，维持精确匹配。
+    """
+    skey = str(code)
+    keys = {str(k): k for k in new_resp}
+    if skey in keys:
+        return keys[skey]
+    if not _is_three_digit_code(skey):
+        return None
+    if skey[0] in "12345":
+        lower = {k.lower(): k for k in keys}
+        hit = lower.get(f"{skey[0]}xx")
+        if hit is not None:
+            return keys[hit]
+    return keys.get("default")
 
 
 def _media_types(rb: Any) -> list[str]:
