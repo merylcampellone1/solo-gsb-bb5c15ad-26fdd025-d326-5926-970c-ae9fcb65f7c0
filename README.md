@@ -1,6 +1,6 @@
 # 🔎 OpenAPI 版本兼容性审查工具
 
-对比新旧两份 **OpenAPI 3.x**（JSON / YAML）文档，递归解析 `$ref`（**支持循环引用**）、合并 `allOf`，按**请求 / 响应两个方向**的语义规则判断每一处变更是否向后兼容，精确定位破坏性变更的 JSON 路径并给出原因；并对**两版共有操作的同一状态码**比较**响应头契约**（旧头移除 / 必填变可选判破坏，新增头 / 可选变必填判兼容，共有头 schema 按响应方向判放宽破坏 / 收窄兼容；头名忽略大小写，单侧仅大小写不同的重复定义按文档冲突指出位置而不任选一份；响应 / 头对象本地 `$ref` 按目标解析，无法解析只指出位置不猜测）；并按 OpenAPI 语义计算每个操作的**有效认证要求**（操作级 `security` 覆盖根级），识别认证收紧（缺少方案 / OAuth scope 变多 / 匿名变需认证）类破坏。支持结果筛选、**根因聚合视图**（有向影响组）、引用展开树浏览、审查报告下载、**单条发现的最小复现包导出**、历史记录与**破坏项对账**（基线审查 vs 当前审查）、**限时豁免**（按 API 标识为破坏项设置带 UTC 到期时间的豁免，"未豁免为零才可放行"）、**组件可达性审计**（从 paths / webhooks 入口沿本地 `$ref` 传递追踪，列出未被入口触达的组件并标出新版独有的未使用组件）、**调用清单影响定位**（在审查详情导入 `method,path,count` 的 CSV，按旧版 paths 匹配每行调用、按操作汇总调用量并关联破坏性发现；歧义不分配、结果仅本次查看），以及**请求样本回放**（提交多条含旧版操作方法 / 路径模板 / Content-Type / JSON 请求体的样本，逐条返回旧版与新版请求体校验状态、失败字段路径与"旧版接受而新版拒绝"的风险汇总；结果仅本次查看），以及 **Link 后续调用参数预览**（在审查详情选择旧 / 新版与源操作，提交一次响应实例：状态码 + JSON 响应体 + 响应头；响应按精确码 → 范围码 → default 匹配，逐条 Link 显示指针、目标方法 / 路径与每个后续调用参数的解析值与缺失 / 未知 / 表达式错误；仅静态预览，不发请求、不入库、不改结论）。
+对比新旧两份 **OpenAPI 3.x**（JSON / YAML）文档，递归解析 `$ref`（**支持循环引用**）、合并 `allOf`，按**请求 / 响应两个方向**的语义规则判断每一处变更是否向后兼容，精确定位破坏性变更的 JSON 路径并给出原因；并对**两版共有操作的同一状态码**比较**响应头契约**（旧头移除 / 必填变可选判破坏，新增头 / 可选变必填判兼容，共有头 schema 按响应方向判放宽破坏 / 收窄兼容；头名忽略大小写，单侧仅大小写不同的重复定义按文档冲突指出位置而不任选一份；响应 / 头对象本地 `$ref` 按目标解析，无法解析只指出位置不猜测）；旧版**三位状态码**在新版按 同码 → 所属 `1XX`～`5XX` 范围码 → `default` 取生效定义做**覆盖判断**（找到覆盖即比较两侧定义，不因响应键更名误报删除；完全无覆盖才报失去覆盖）；并按 OpenAPI 语义计算每个操作的**有效认证要求**（操作级 `security` 覆盖根级），识别认证收紧（缺少方案 / OAuth scope 变多 / 匿名变需认证）类破坏。支持结果筛选、**根因聚合视图**（有向影响组）、引用展开树浏览、审查报告下载、**单条发现的最小复现包导出**、历史记录与**破坏项对账**（基线审查 vs 当前审查）、**限时豁免**（按 API 标识为破坏项设置带 UTC 到期时间的豁免，"未豁免为零才可放行"）、**组件可达性审计**（从 paths / webhooks 入口沿本地 `$ref` 传递追踪，列出未被入口触达的组件并标出新版独有的未使用组件）、**调用清单影响定位**（在审查详情导入 `method,path,count` 的 CSV，按旧版 paths 匹配每行调用、按操作汇总调用量并关联破坏性发现；歧义不分配、结果仅本次查看），以及**请求样本回放**（提交多条含旧版操作方法 / 路径模板 / Content-Type / JSON 请求体的样本，逐条返回旧版与新版请求体校验状态、失败字段路径与"旧版接受而新版拒绝"的风险汇总；结果仅本次查看），以及 **Link 后续调用参数预览**（在审查详情选择旧 / 新版与源操作，提交一次响应实例：状态码 + JSON 响应体 + 响应头；响应按精确码 → 范围码 → default 匹配，逐条 Link 显示指针、目标方法 / 路径与每个后续调用参数的解析值与缺失 / 未知 / 表达式错误；仅静态预览，不发请求、不入库、不改结论）。
 
 技术栈：**FastAPI + SQLite + 原生 JavaScript**（前端零构建、零框架依赖）。
 
@@ -99,11 +99,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 \* 请求字段从契约移除时服务端可能开始忽略/拒绝，工具以兼容记录并在原因中注明。
 
-结构层面还覆盖：路径与操作的新增/删除、pathItem 级与操作级参数合并比较、参数必填性 / `style` / `explode` / `deprecated`、请求体必填性变化、媒体类型增删（请求 415 / 响应 Content-Type）、**响应头（`responses[*].headers`）契约变化**（见下节）、响应状态码增删、按**操作实际生效**的 `servers` 增删（操作级 → 路径级 → 根级优先，详见下文）、`operationId` 变化、`oneOf/anyOf` 分支增删等。
+结构层面还覆盖：路径与操作的新增/删除、pathItem 级与操作级参数合并比较、参数必填性 / `style` / `explode` / `deprecated`、请求体必填性变化、媒体类型增删（请求 415 / 响应 Content-Type）、**响应头（`responses[*].headers`）契约变化**（见下节）、**响应状态码覆盖**（旧版三位状态码按 同码 → 所属 `1XX`～`5XX` 范围码 → `default` 取新版生效定义比较，完全无覆盖才报 `response-removed`，详见下文「🧭 响应状态码覆盖」）、按**操作实际生效**的 `servers` 增删（操作级 → 路径级 → 根级优先，详见下文）、`operationId` 变化、`oneOf/anyOf` 分支增删等。
 
 ### 📨 响应头（response headers）契约
 
-对**两版共有操作的同一状态码**响应比较其 `headers`；整条响应新增 / 删除时沿用 `response-added` / `response-removed` 的原结论，**不重复生成头发现**。响应对象与头对象上的**本地 `$ref` 按目标定义解析**（响应本身是 `$ref` 时，头发现的 JSON Pointer 锚到 `/components/responses/.../headers/...`）。
+对**两版共有操作的同一状态码**响应比较其 `headers`；旧版三位状态码被新版同码 / 范围码 / `default` 覆盖时按覆盖配对比较（见下文「🧭 响应状态码覆盖」）。整条响应新增 / 删除时沿用 `response-added` / `response-removed` 的原结论，**不重复生成头发现**。响应对象与头对象上的**本地 `$ref` 按目标定义解析**（响应本身是 `$ref` 时，头发现的 JSON Pointer 锚到 `/components/responses/.../headers/...`）。
 
 - **头名不区分大小写**：两侧 `X-Trace` 与 `x-trace` 视为同一个头配对比较；**单侧仅大小写不同的重复定义**（如同一个响应里同时出现 `X-Foo` 与 `x-foo`）属于**文档冲突**，报 ⚪ 信息级 `response-header-name-conflict`，在消息与 `old_value` / `new_value` 中列出**全部定义位置**而不任选一份，冲突头名不参与双侧比较（对侧同名头也不会被判为新增 / 删除）。
 - **必填性与增删**（`required` 缺省按**可选**处理）：
@@ -194,6 +194,72 @@ curl -X POST http://localhost:8000/api/reviews \
   "new_value": null
 }
 ```
+
+### 🧭 响应状态码覆盖（三位码 ← 范围码 / default）
+
+对**两版共有操作**下旧版明确声明的**三位状态码**（如 `200`、`404`；YAML 里写成整数的键同样识别），新版响应按以下顺序取**生效定义**：
+
+1. **同码**：新版仍声明相同状态码；
+2. **范围码**：所属 `1XX`～`5XX` 范围键（如 `2XX` 覆盖 `200` / `201`，小写 `2xx` 同样识别，与 Link 预览的响应匹配口径一致）；
+3. **`default`**。
+
+- **找到覆盖**：按现有**响应方向**规则比较两侧定义（响应头契约 + 响应内容 schema + deprecated 标记），发现定位到该状态码（`responses[200]`）与**两侧各自的定义位置**（旧 `…/responses/200`、新 `…/responses/2XX`）；**不因响应键更名报告 `response-removed`**，被消费的新版响应键也不再报 `response-added`——旧 `200` 换成内容相同的新 `2XX` 时**零发现**。
+- **完全无覆盖**（同码、范围码、`default` 都没有）才报告 🔴 `response-removed`：该状态码在新版失去覆盖。
+- **生效定义的本地 `$ref` 无法解析**（外部引用 / 目标不存在 / 目标非对象）：报 ⚪ `response-ref-unresolved`，只指出引用位置（操作、状态码、JSON Pointer），**不推断头、内容或兼容结论**。
+- **其他响应键维持现状**：旧版的 `default` / 范围码键仍按精确键匹配（新版没有同键即 `response-removed`）；新版未被任何旧状态码消费的响应键仍按 `response-added` 报告。
+
+#### 状态码覆盖审查 HTTP 示例
+
+沿用现有审查接口，无需新增端点：`POST /api/reviews` 提交两份文档即可。
+
+```bash
+curl -X POST http://localhost:8000/api/reviews \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "状态码覆盖示例",
+    "old_spec": "openapi: \"3.0.3\"\ninfo: {title: Pets, version: \"1\"}\npaths:\n  /pets:\n    get:\n      responses:\n        \"200\":\n          description: ok\n          headers:\n            X-Trace:\n              required: true\n              schema: {type: string}\n        \"404\":\n          description: 未找到\n",
+    "new_spec": "openapi: \"3.0.3\"\ninfo: {title: Pets, version: \"2\"}\npaths:\n  /pets:\n    get:\n      responses:\n        \"2XX\":\n          description: ok\n          headers:\n            X-Trace:\n              schema: {type: string}\n"
+  }'
+```
+
+- 旧 `200` 由新 `2XX` 覆盖：不报 `response-removed`，两侧定义照常比较——`X-Trace` 由必填变可选 → 🔴 `response-header-became-optional`，新版指针指向实际生效的 `…/responses/2XX` 定义；
+- 旧 `404` 在新版无同码、无 `4XX`、无 `default` → 🔴 `response-removed`（失去覆盖）。
+
+响应（节选）：
+
+```json
+{
+  "id": 1,
+  "summary": { "compatible": false, "by_category": { "响应": 2 } },
+  "findings": [
+    {
+      "rule_id": "response-removed",
+      "severity": "breaking",
+      "category": "响应",
+      "direction": "response",
+      "endpoint": "GET /pets",
+      "location": "responses[404]",
+      "old_json_path": "/paths/pets/get/responses/404",
+      "new_json_path": null,
+      "old_value": "404"
+    },
+    {
+      "rule_id": "response-header-became-optional",
+      "severity": "breaking",
+      "category": "响应",
+      "direction": "response",
+      "endpoint": "GET /pets",
+      "location": "responses[200] → 响应头 X-Trace",
+      "old_json_path": "/paths/pets/get/responses/200/headers/X-Trace/required",
+      "new_json_path": "/paths/pets/get/responses/2XX/headers/X-Trace/required",
+      "old_value": true,
+      "new_value": false
+    }
+  ]
+}
+```
+
+若新版 `2XX` 与旧 `200` 内容完全相同，则 `findings` 为空、`summary.compatible` 为 `true`（键更名本身不产生任何发现）。
 
 ### 🔐 认证要求（security）兼容性
 
@@ -763,7 +829,7 @@ curl -X POST http://localhost:8000/api/reviews/1/link-preview \
 │   ├── main.py        # FastAPI：审查 / 历史 / 引用树 / 根因聚合 / 破坏项对账 / 组件可达性审计 / 调用清单影响定位 / 请求样本回放 / Link 参数预览 / 限时豁免 / 报告下载 / 健康检查接口
 │   ├── parser.py      # JSON·YAML 载入与 OpenAPI 3.x 校验
 │   ├── refs.py        # JSON Pointer、$ref 解析、循环安全的引用展开树
-│   ├── diff.py        # 语义兼容性规则引擎（请求/响应双方向 + 响应头 headers 契约 + 操作级/根级 security 认证要求 + 操作级/路径级/根级 servers 生效地址比较）
+│   ├── diff.py        # 语义兼容性规则引擎（请求/响应双方向 + 响应状态码覆盖：同码→范围码→default + 响应头 headers 契约 + 操作级/根级 security 认证要求 + 操作级/路径级/根级 servers 生效地址比较）
 │   ├── groups.py      # 根因聚合：端点×方向分区、同源归并、祖先吸收的有向影响组
 │   ├── reconcile.py   # 破坏项对账：稳定身份配对，输出新增 / 延续 / 已消失
 │   ├── reachability.py # 组件可达性审计：paths/webhooks 入口 → 本地 $ref 传递追踪，未触达组件与无效引用
@@ -788,7 +854,7 @@ curl -X POST http://localhost:8000/api/reviews/1/link-preview \
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/reviews` | 提交 `{old_spec, new_spec, api_id?, ...}` 执行审查并持久化（响应含豁免视图）；`server-removed` / `server-added` 按每个共同操作的**实际生效** servers（操作级 → 路径级 → 根级 → 默认 `/`）报告；两版共有操作同一状态码的**响应头**按 `response-header-*` / 头 schema 规则报告（见上文「📨 响应头契约」），调用示例见下文「🌐 服务器地址审查 HTTP 示例」 |
+| `POST` | `/api/reviews` | 提交 `{old_spec, new_spec, api_id?, ...}` 执行审查并持久化（响应含豁免视图）；`server-removed` / `server-added` 按每个共同操作的**实际生效** servers（操作级 → 路径级 → 根级 → 默认 `/`）报告；旧版三位状态码按 同码 → 范围码 → `default` 取新版生效定义做覆盖判断（完全无覆盖才报 `response-removed`，见上文「🧭 响应状态码覆盖」）；两版共有操作同一状态码（含覆盖配对）的**响应头**按 `response-header-*` / 头 schema 规则报告（见上文「📨 响应头契约」），调用示例见下文「🌐 服务器地址审查 HTTP 示例」 |
 | `GET` | `/api/reviews` | 历史审查列表 |
 | `GET` | `/api/reviews/{id}` | 审查详情（含全部 findings 与实时豁免视图） |
 | `PATCH` | `/api/reviews/{id}` | 设置 / 清除审查的 API 标识 `{api_id}` |

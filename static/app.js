@@ -1918,7 +1918,7 @@
     {
       title: "响应头（responses.headers，响应方向）",
       items: [
-        "仅比较两版<b>共有操作的同一状态码</b>响应；整条响应新增 / 删除沿用 response-added / response-removed，不重复生成头发现",
+        "仅比较两版<b>共有操作的同一状态码</b>响应（旧版三位码被新版同码 / 范围码 / default 覆盖时按覆盖配对比较）；整条响应新增 / 删除沿用 response-added / response-removed，不重复生成头发现",
         "响应与头对象的本地 <code>$ref</code> 按目标定义解析；无法解析（外部引用 / 目标缺失）时指出位置，不生成猜测结论",
         "头名不区分大小写；<b>单侧仅大小写不同的重复定义</b>视为文档冲突（<code>response-header-name-conflict</code>，⚪ 信息），列出位置而不任选一份，冲突头不参与比较",
         "<code>移除旧响应头</code>：🔴 <code>response-header-removed</code>；新增响应头：🟢 <code>response-header-added</code>",
@@ -1930,6 +1930,7 @@
     {
       title: "状态码与媒体类型",
       items: [
+        "旧版<b>三位状态码</b>按 同码 → 所属 1XX–5XX 范围码（如 2XX）→ default 取新版生效定义比较，<b>不因响应键更名报删除</b>；完全无覆盖才 🔴 <code>response-removed</code>",
         "<code>删除 2xx 响应</code>：🔴；新增成功响应：🟢",
         "删除错误码：🔴（风险较低，消息中注明）",
         "请求：<code>服务端不再接受某 Content-Type</code>：🔴（415）",
